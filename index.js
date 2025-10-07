@@ -11,7 +11,7 @@ const BUYER_ROLE_ID = process.env.BUYER_ROLE_ID;
 // KeyAuth Credentials
 const KEYAUTH_OWNER_ID = process.env.KEYAUTH_OWNER_ID;
 const KEYAUTH_APP_NAME = process.env.KEYAUTH_APP_NAME;
-const KEYAUTH_SELLER_KEY = process.env.KEYAUTH_SELLER_KEY;
+const KEYAUTH_APP_SECRET = process.env.KEYAUTH_APP_SECRET; // Renamed for clarity
 
 // Create a new Discord client
 const client = new Client({
@@ -21,7 +21,7 @@ const client = new Client({
     ]
 });
 
-// Define the slash command
+// Define the slash command (no change here)
 const commands = [
     new SlashCommandBuilder()
         .setName('redeem')
@@ -60,24 +60,29 @@ client.on('interactionCreate', async interaction => {
     await interaction.deferReply({ ephemeral: true });
 
     try {
-        // Prepare data for the KeyAuth API
-        const apiData = new URLSearchParams({
-            type: 'license',
-            key: key,
-            ownerid: KEYAUTH_OWNER_ID,
-            name: KEYAUTH_APP_NAME,
-            sellerkey: KEYAUTH_SELLER_KEY,
-            user: user.id 
-        });
-
-        // Make the POST request to the KeyAuth API
-        const response = await axios.post('https://keyauth.win/api/seller/', apiData);
+        // *** THIS IS THE CORRECTED API CALL SECTION ***
+        const response = await axios.post(
+            'https://keyauth.win/api/1.2/',
+            new URLSearchParams({
+                type: 'license',
+                key: key,
+                ownerid: KEYAUTH_OWNER_ID,
+                name: KEYAUTH_APP_NAME,
+                sessionid: client.user.id, // A unique session ID, bot's ID is fine
+                user: user.id // Pass the Discord User ID
+            }),
+            {
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': KEYAUTH_APP_SECRET // Pass the secret in the Authorization header
+                }
+            }
+        );
+        // *** END OF CORRECTED SECTION ***
 
         const data = response.data;
 
-        // Check the API response
         if (data.success) {
-            // SUCCESS: The key is valid
             const role = await interaction.guild.roles.fetch(BUYER_ROLE_ID);
             if (role) {
                 await member.roles.add(role);
@@ -87,12 +92,11 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ content: '⚠️ Key was valid, but I could not find the buyer role to assign. Please contact an admin.' });
             }
         } else {
-            // FAILURE: The key is invalid
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
-        console.error('Error calling KeyAuth API:', error);
-        await interaction.editReply({ content: 'An unexpected error occurred. Please try again later.' });
+        console.error('API Error:', error.response ? error.response.data : error.message);
+        await interaction.editReply({ content: 'An unexpected error occurred while contacting the authentication server. Please try again later.' });
     }
 });
 
