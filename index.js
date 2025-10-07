@@ -25,6 +25,7 @@ const client = new Client({
 let keyauthSession = null;
 
 // THIS IS NEW: A function to initialize the connection with KeyAuth
+// THIS IS NEW: A function to initialize the connection with KeyAuth
 async function initializeKeyAuth() {
     try {
         console.log('Initializing KeyAuth session...');
@@ -32,7 +33,7 @@ async function initializeKeyAuth() {
             'https://keyauth.win/api/1.2/',
             new URLSearchParams({
                 type: 'init',
-                ver: '1.2', // It's good practice to specify the version
+                // ver: '1.2', // <--- REMOVE THIS LINE
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
                 secret: KEYAUTH_APP_SECRET
