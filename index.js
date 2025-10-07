@@ -50,23 +50,20 @@ client.on('ready', async () => {
 });
 
 // Listen for interactions
+// Listen for interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
-    // Try to defer the reply, but if it fails (because it timed out), catch the error and stop.
-    try {
-        await interaction.deferReply({ ephemeral: true });
-    } catch (error) {
-        console.error("Failed to defer reply, likely due to interaction timeout:", error);
-        return; // Stop executing if we can't respond
-    }
-    const key = interaction.options.getString('key');
-    const user = interaction.user;
-    const member = interaction.member;
 
-    await interaction.deferReply({ ephemeral: true });
-
+    // We will try to handle everything within one main block.
     try {
-        // *** THIS IS THE CORRECTED API CALL SECTION ***
+        // Step 1: Defer the reply immediately. This sends the "Bot is thinking..." message.
+        await interaction.deferReply({ flags: 64 }); // 64 is the flag for an ephemeral reply
+
+        const key = interaction.options.getString('key');
+        const user = interaction.user;
+        const member = interaction.member;
+
+        // Step 2: Make the API call
         const response = await axios.post(
             'https://keyauth.win/api/1.2/',
             new URLSearchParams({
@@ -74,35 +71,45 @@ client.on('interactionCreate', async interaction => {
                 key: key,
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
-                sessionid: client.user.id, // A unique session ID, bot's ID is fine
-                user: user.id // Pass the Discord User ID
+                sessionid: require('crypto').randomBytes(16).toString('hex'),
+                user: user.id
             }),
             {
                 headers: {
                     'Accept': 'application/json',
-                    'Authorization': KEYAUTH_APP_SECRET // Pass the secret in the Authorization header
+                    'Authorization': KEYAUTH_APP_SECRET
                 }
             }
         );
-        // *** END OF CORRECTED SECTION ***
 
         const data = response.data;
 
+        // Step 3: Handle the API response (Success or Failure)
         if (data.success) {
             const role = await interaction.guild.roles.fetch(BUYER_ROLE_ID);
             if (role) {
                 await member.roles.add(role);
+                // We EDIT the original "thinking..." message with the success response.
                 await interaction.editReply({ content: '✅ Success! Your key has been redeemed and the buyer role has been assigned.' });
-                await user.send(`Thank you for your purchase! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {});
+                await user.send(`Thank you! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {});
             } else {
                 await interaction.editReply({ content: '⚠️ Key was valid, but I could not find the buyer role to assign. Please contact an admin.' });
             }
         } else {
+            // If KeyAuth says the key is invalid, we EDIT the reply.
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
-        console.error('API Error:', error.response ? error.response.data : error.message);
-        await interaction.editReply({ content: 'An unexpected error occurred while contacting the authentication server. Please try again later.' });
+        console.error('An error occurred during the redeem interaction:', error);
+
+        // Step 4: If ANY error occurs, we CATCH it and EDIT the reply with an error message.
+        // We check if a reply has already been sent to avoid another crash.
+        if (!interaction.replied && !interaction.deferred) {
+            // This is a fallback, but unlikely to be needed with our structure.
+            await interaction.reply({ content: 'An unexpected error occurred. Please try again.', flags: 64 });
+        } else {
+            await interaction.editReply({ content: 'An unexpected error occurred. Please try again.' });
+        }
     }
 });
 
