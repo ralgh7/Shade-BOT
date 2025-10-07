@@ -52,7 +52,13 @@ client.on('ready', async () => {
 // Listen for interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
-
+    // Try to defer the reply, but if it fails (because it timed out), catch the error and stop.
+    try {
+        await interaction.deferReply({ ephemeral: true });
+    } catch (error) {
+        console.error("Failed to defer reply, likely due to interaction timeout:", error);
+        return; // Stop executing if we can't respond
+    }
     const key = interaction.options.getString('key');
     const user = interaction.user;
     const member = interaction.member;
