@@ -11,7 +11,7 @@ const BUYER_ROLE_ID = process.env.BUYER_ROLE_ID;
 // KeyAuth Credentials
 const KEYAUTH_OWNER_ID = process.env.KEYAUTH_OWNER_ID;
 const KEYAUTH_APP_NAME = process.env.KEYAUTH_APP_NAME;
-const KEYAUTH_APP_SECRET = process.env.KEYAUTH_APP_SECRET; // Renamed for clarity
+const KEYAUTH_APP_SECRET = process.env.KEYAUTH_APP_SECRET;
 
 // Create a new Discord client
 const client = new Client({
@@ -21,7 +21,40 @@ const client = new Client({
     ]
 });
 
-// Define the slash command (no change here)
+// THIS IS NEW: We need a variable to store our KeyAuth session data
+let keyauthSession = null;
+
+// THIS IS NEW: A function to initialize the connection with KeyAuth
+async function initializeKeyAuth() {
+    try {
+        console.log('Initializing KeyAuth session...');
+        const response = await axios.post(
+            'https://keyauth.win/api/1.2/',
+            new URLSearchParams({
+                type: 'init',
+                ver: '1.2', // It's good practice to specify the version
+                ownerid: KEYAUTH_OWNER_ID,
+                name: KEYAUTH_APP_NAME,
+                secret: KEYAUTH_APP_SECRET
+            })
+        );
+
+        const data = response.data;
+        if (data.success) {
+            keyauthSession = data; // Store the entire successful response
+            console.log('✅ KeyAuth session initialized successfully!');
+        } else {
+            // If initialization fails, log the error and stop the bot.
+            console.error(`❌ KeyAuth initialization failed: ${data.message}`);
+            process.exit(1); // Exit if we can't connect to KeyAuth
+        }
+    } catch (error) {
+        console.error('❌ Critical error during KeyAuth initialization:', error.message);
+        process.exit(1);
+    }
+}
+
+// Define the slash command
 const commands = [
     new SlashCommandBuilder()
         .setName('redeem')
@@ -33,8 +66,11 @@ const commands = [
         .toJSON(),
 ];
 
-// Register slash commands with Discord when the bot is ready
+// When the bot is ready, register commands AND initialize KeyAuth
 client.on('ready', async () => {
+    // THIS IS NEW: Initialize KeyAuth before the bot is fully ready
+    await initializeKeyAuth();
+
     try {
         const rest = new REST({ version: '10' }).setToken(TOKEN);
         console.log('Started refreshing application (/) commands.');
@@ -49,66 +85,63 @@ client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
 });
 
-// Listen for interactions
+
 // Listen for interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
 
-    // We will try to handle everything within one main block.
+    // We can't do anything if the KeyAuth session failed to initialize
+    if (!keyauthSession) {
+        await interaction.reply({ content: '❌ The authentication service is currently unavailable. Please try again later.', ephemeral: true });
+        return;
+    }
+
     try {
-        // Step 1: Defer the reply immediately. This sends the "Bot is thinking..." message.
-        await interaction.deferReply({ flags: 64 }); // 64 is the flag for an ephemeral reply
+        await interaction.deferReply({ ephemeral: true }); // ephemeral: true is the same as flags: 64
 
         const key = interaction.options.getString('key');
         const user = interaction.user;
         const member = interaction.member;
 
-        // Step 2: Make the API call
+        // Make the API call WITH THE STORED SESSION ID
         const response = await axios.post(
             'https://keyauth.win/api/1.2/',
+            // THIS SECTION IS MODIFIED
             new URLSearchParams({
                 type: 'license',
                 key: key,
+                sessionid: keyauthSession.sessionid, // Use the sessionid from our init call
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
-                sessionid: require('crypto').randomBytes(16).toString('hex'),
+                secret: KEYAUTH_APP_SECRET, // The secret goes here now
                 user: user.id
-            }),
-            {
-                headers: {
-                    'Accept': 'application/json',
-                    'Authorization': KEYAUTH_APP_SECRET
-                }
-            }
+            })
+            // We no longer need custom headers
         );
 
         const data = response.data;
 
-        // Step 3: Handle the API response (Success or Failure)
         if (data.success) {
             const role = await interaction.guild.roles.fetch(BUYER_ROLE_ID);
             if (role) {
                 await member.roles.add(role);
-                // We EDIT the original "thinking..." message with the success response.
                 await interaction.editReply({ content: '✅ Success! Your key has been redeemed and the buyer role has been assigned.' });
-                await user.send(`Thank you! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {});
+                // DM the user for confirmation
+                await user.send(`Thank you! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {
+                    console.log(`Could not DM user ${user.id}. They may have DMs disabled.`);
+                });
             } else {
                 await interaction.editReply({ content: '⚠️ Key was valid, but I could not find the buyer role to assign. Please contact an admin.' });
             }
         } else {
-            // If KeyAuth says the key is invalid, we EDIT the reply.
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
-        console.error('An error occurred during the redeem interaction:', error);
+        console.error('An error occurred during the redeem interaction:', error.response ? error.response.data : error.message);
 
-        // Step 4: If ANY error occurs, we CATCH it and EDIT the reply with an error message.
-        // We check if a reply has already been sent to avoid another crash.
-        if (!interaction.replied && !interaction.deferred) {
-            // This is a fallback, but unlikely to be needed with our structure.
-            await interaction.reply({ content: 'An unexpected error occurred. Please try again.', flags: 64 });
-        } else {
-            await interaction.editReply({ content: 'An unexpected error occurred. Please try again.' });
+        // Check if we can still edit the reply, otherwise do nothing to avoid crashing
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content: 'An unexpected server error occurred. Please try again later.' }).catch(console.error);
         }
     }
 });
