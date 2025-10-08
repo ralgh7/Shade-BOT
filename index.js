@@ -89,33 +89,30 @@ client.on('ready', async () => {
 
 // Listen for interactions
 // Listen for interactions
+// Listen for interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
 
-    // We can't do anything if the KeyAuth session failed to initialize
-    if (!keyauthSession) {
-        await interaction.reply({ content: '❌ The authentication service is currently unavailable. Please try again later.', ephemeral: true });
-        return;
-    }
-
-    const member = interaction.member; // We define member here to use it for the check
-
-    // NEW: Check if the user already has the buyer role
-    if (member.roles.cache.has(BUYER_ROLE_ID)) {
-        await interaction.reply({
-            content: 'You already have the buyer role and cannot redeem another key.',
-            ephemeral: true // This message is only visible to the user
-        });
-        return; // Stop the command here
-    }
+    // We must acknowledge the interaction within 3 seconds.
+    // Deferring the reply sends a "Bot is thinking..." message and gives us more time.
+    await interaction.deferReply({ ephemeral: true });
 
     try {
-        await interaction.deferReply({ ephemeral: true });
+        if (!keyauthSession) {
+            await interaction.editReply({ content: '❌ The authentication service is currently unavailable. Please try again later.' });
+            return;
+        }
+
+        if (interaction.member.roles.cache.has(BUYER_ROLE_ID)) {
+            await interaction.editReply({
+                content: 'You already have the buyer role and cannot redeem another key.'
+            });
+            return; // Stop the command here
+        }
 
         const key = interaction.options.getString('key');
         const user = interaction.user;
         
-        // Make the API call WITH THE STORED SESSION ID
         const response = await axios.post(
             'https://keyauth.win/api/1.2/',
             new URLSearchParams({
@@ -125,7 +122,7 @@ client.on('interactionCreate', async interaction => {
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
                 secret: KEYAUTH_APP_SECRET,
-                user: user.id // KeyAuth uses this to link the key to the Discord user ID
+                user: user.id
             })
         );
 
@@ -134,25 +131,19 @@ client.on('interactionCreate', async interaction => {
         if (data.success) {
             const role = await interaction.guild.roles.fetch(BUYER_ROLE_ID);
             if (role) {
-                await member.roles.add(role);
+                await interaction.member.roles.add(role);
                 await interaction.editReply({ content: '✅ Success! Your key has been redeemed and the buyer role has been assigned.' });
-                // DM the user for confirmation
-                await user.send(`Thank you! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {
-                    console.log(`Could not DM user ${user.id}. They may have DMs disabled.`);
-                });
+                await user.send(`Thank you! Your key \`${key}\` was successfully redeemed in "${interaction.guild.name}".`).catch(() => {});
             } else {
                 await interaction.editReply({ content: '⚠️ Key was valid, but I could not find the buyer role to assign. Please contact an admin.' });
             }
         } else {
-            // This block will now handle errors like "Key has already been redeemed."
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
-        console.error('An error occurred during the redeem interaction:', error.response ? error.response.data : error.message);
-
-        if (interaction.deferred || interaction.replied) {
-            await interaction.editReply({ content: 'An unexpected server error occurred. Please try again later.' }).catch(console.error);
-        }
+        console.error('An error occurred during the redeem interaction:', error); // Log the full error
+        // Since we already deferred, we edit the reply if an error occurs.
+        await interaction.editReply({ content: 'An unexpected error occurred while processing your command.' }).catch(console.error);
     }
 });
 
