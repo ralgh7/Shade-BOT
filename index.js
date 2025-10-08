@@ -1,5 +1,5 @@
 // Import necessary libraries
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, Events } = require('discord.js');
 const axios = require('axios');
 require('dotenv').config();
 
@@ -21,11 +21,10 @@ const client = new Client({
     ]
 });
 
-// THIS IS NEW: We need a variable to store our KeyAuth session data
+// Variable to store our KeyAuth session data
 let keyauthSession = null;
 
-// THIS IS NEW: A function to initialize the connection with KeyAuth
-// THIS IS NEW: A function to initialize the connection with KeyAuth
+// Function to initialize the connection with KeyAuth
 async function initializeKeyAuth() {
     try {
         console.log('Initializing KeyAuth session...');
@@ -33,7 +32,6 @@ async function initializeKeyAuth() {
             'https://keyauth.win/api/1.2/',
             new URLSearchParams({
                 type: 'init',
-                // ver: '1.2', // <--- REMOVE THIS LINE
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
                 secret: KEYAUTH_APP_SECRET
@@ -42,12 +40,11 @@ async function initializeKeyAuth() {
 
         const data = response.data;
         if (data.success) {
-            keyauthSession = data; // Store the entire successful response
+            keyauthSession = data;
             console.log('✅ KeyAuth session initialized successfully!');
         } else {
-            // If initialization fails, log the error and stop the bot.
             console.error(`❌ KeyAuth initialization failed: ${data.message}`);
-            process.exit(1); // Exit if we can't connect to KeyAuth
+            process.exit(1);
         }
     } catch (error) {
         console.error('❌ Critical error during KeyAuth initialization:', error.message);
@@ -68,8 +65,7 @@ const commands = [
 ];
 
 // When the bot is ready, register commands AND initialize KeyAuth
-client.on('ready', async () => {
-    // THIS IS NEW: Initialize KeyAuth before the bot is fully ready
+client.on(Events.ClientReady, async () => {
     await initializeKeyAuth();
 
     try {
@@ -86,15 +82,11 @@ client.on('ready', async () => {
     console.log(`Logged in as ${client.user.tag}!`);
 });
 
-
 // Listen for interactions
-// Listen for interactions
-// Listen for interactions
-client.on('interactionCreate', async interaction => {
+client.on(Events.InteractionCreate, async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
 
-    // We must acknowledge the interaction within 3 seconds.
-    // Deferring the reply sends a "Bot is thinking..." message and gives us more time.
+    // Defer the reply immediately to prevent "Unknown Interaction" errors
     await interaction.deferReply({ ephemeral: true });
 
     try {
@@ -107,7 +99,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply({
                 content: 'You already have the buyer role and cannot redeem another key.'
             });
-            return; // Stop the command here
+            return;
         }
 
         const key = interaction.options.getString('key');
@@ -127,6 +119,8 @@ client.on('interactionCreate', async interaction => {
         );
 
         const data = response.data;
+        // Log the full response from KeyAuth to the console for debugging
+        console.log('KeyAuth API Response:', data);
 
         if (data.success) {
             const role = await interaction.guild.roles.fetch(BUYER_ROLE_ID);
@@ -141,8 +135,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
-        console.error('An error occurred during the redeem interaction:', error); // Log the full error
-        // Since we already deferred, we edit the reply if an error occurs.
+        console.error('An error occurred during the redeem interaction:', error);
         await interaction.editReply({ content: 'An unexpected error occurred while processing your command.' }).catch(console.error);
     }
 });
