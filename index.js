@@ -88,6 +88,7 @@ client.on('ready', async () => {
 
 
 // Listen for interactions
+// Listen for interactions
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand() || interaction.commandName !== 'redeem') return;
 
@@ -97,27 +98,35 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    const member = interaction.member; // We define member here to use it for the check
+
+    // NEW: Check if the user already has the buyer role
+    if (member.roles.cache.has(BUYER_ROLE_ID)) {
+        await interaction.reply({
+            content: 'You already have the buyer role and cannot redeem another key.',
+            ephemeral: true // This message is only visible to the user
+        });
+        return; // Stop the command here
+    }
+
     try {
-        await interaction.deferReply({ ephemeral: true }); // ephemeral: true is the same as flags: 64
+        await interaction.deferReply({ ephemeral: true });
 
         const key = interaction.options.getString('key');
         const user = interaction.user;
-        const member = interaction.member;
-
+        
         // Make the API call WITH THE STORED SESSION ID
         const response = await axios.post(
             'https://keyauth.win/api/1.2/',
-            // THIS SECTION IS MODIFIED
             new URLSearchParams({
                 type: 'license',
                 key: key,
-                sessionid: keyauthSession.sessionid, // Use the sessionid from our init call
+                sessionid: keyauthSession.sessionid,
                 ownerid: KEYAUTH_OWNER_ID,
                 name: KEYAUTH_APP_NAME,
-                secret: KEYAUTH_APP_SECRET, // The secret goes here now
-                user: user.id
+                secret: KEYAUTH_APP_SECRET,
+                user: user.id // KeyAuth uses this to link the key to the Discord user ID
             })
-            // We no longer need custom headers
         );
 
         const data = response.data;
@@ -135,12 +144,12 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({ content: '⚠️ Key was valid, but I could not find the buyer role to assign. Please contact an admin.' });
             }
         } else {
+            // This block will now handle errors like "Key has already been redeemed."
             await interaction.editReply({ content: `❌ Redemption failed: ${data.message}` });
         }
     } catch (error) {
         console.error('An error occurred during the redeem interaction:', error.response ? error.response.data : error.message);
 
-        // Check if we can still edit the reply, otherwise do nothing to avoid crashing
         if (interaction.deferred || interaction.replied) {
             await interaction.editReply({ content: 'An unexpected server error occurred. Please try again later.' }).catch(console.error);
         }
